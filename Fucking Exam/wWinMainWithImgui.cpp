@@ -17,7 +17,7 @@
 using namespace std;
 using namespace FuckingExam;
 
-// Data
+// STATIC DATA
 static ID3D11Device* g_pd3dDevice = NULL;
 static ID3D11DeviceContext* g_pd3dDeviceContext = NULL;
 static IDXGISwapChain* g_pSwapChain = NULL;
@@ -27,6 +27,12 @@ static INT wnd_alpha = 255;
 static INT textInputBufferSize = 1 * 1024 * 1024;
 static char* textInputBuffer = new char[textInputBufferSize];
 static HGLOBAL clip_board_data_handle = NULL;
+
+// STATIC DATA
+static int control_key_vk = -1;
+static int printable_key_vk = -1;
+static int control_key_state = 0; //0 for key up 1 for key down
+static int printable_key_state = 0;
 
 // Forward declarations of helper functions
 bool CreateDeviceD3D(HWND hWnd);
@@ -49,7 +55,7 @@ void DummyRectWidget(ImGuiID id, ImVec2 in_size, bool is_filled = true, float th
 #define SayAndExit(arg) MessageBoxW(nullptr,arg,L"警告",MB_OK);return -1;
 
 // Main code
-INT WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLine, INT nCmdShow) {
+INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR lpCmdLine, _In_ INT nCmdShow) {
 
 	// Init Global Vars
 	ZeroMemory(textInputBuffer, textInputBufferSize);
@@ -160,6 +166,31 @@ INT WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 	ZeroMemory(p_file_path, file_path_length);
 
 	vector<Block> block_vec;
+
+	const char* control_keys[] = {U8("左Alt"), U8("左Ctrl"), U8("左Shift")};
+	const int control_keys_vks[] = {VK_LMENU, VK_LCONTROL, VK_LSHIFT};
+	int control_key_selected_idx = 0; // Here we store our selection data as an index.
+
+	const char* printable_keys[] = {
+		U8("A"), U8("B"), U8("C"), U8("D"),U8("E"), U8("F"),
+		U8("G"), U8("H"), U8("I"), U8("J"),U8("K"), U8("L"),
+		U8("M"), U8("N"), U8("O"), U8("P"),U8("Q"), U8("R"),
+		U8("S"), U8("T"), U8("U"), U8("V"),U8("W"), U8("X"),
+		U8("Y"), U8("Z")
+	};
+	const int printable_keys_vks[] = {
+		0x41, 0x42, 0x43, 0x44, 0x45, 0x46,
+		0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C,
+		0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52,
+		0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
+		0x59, 0x5A
+	};
+	int printable_key_selected_idx = 0; // Here we store our selection data as an index.
+	
+	//设置默认快捷键
+	control_key_vk = control_keys_vks[control_key_selected_idx];
+	printable_key_vk = printable_keys_vks[printable_key_selected_idx];
+
 	/*
 	* End App State
 	*/
@@ -373,13 +404,50 @@ INT WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdLin
 						}
 						ImGui::EndTabItem();
 					}
+					if (ImGui::BeginTabItem(U8("设置隐藏窗口快捷键"))) {
+						ImGui::PushItemWidth(80);
+						if (ImGui::BeginCombo(U8("##ControlKey"), control_keys[control_key_selected_idx])) {
+							for (int n = 0; n < IM_ARRAYSIZE(control_keys); n++) {
+								const bool is_selected = (control_key_selected_idx == n);
+								if (ImGui::Selectable(control_keys[n], is_selected)) {
+									control_key_selected_idx = n;
+									control_key_vk = control_keys_vks[n];
+								}
+
+								// Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+								if (is_selected)
+									ImGui::SetItemDefaultFocus();
+							}
+							ImGui::EndCombo();
+						}
+						ImGui::PopItemWidth();
+						ImGui::SameLine();
+						ImGui::Text("+");
+						ImGui::SameLine();
+						ImGui::PushItemWidth(80);
+						if (ImGui::BeginCombo(U8("##PrintableKey"), printable_keys[printable_key_selected_idx])) {
+							for (int n = 0; n < IM_ARRAYSIZE(printable_keys); n++) {
+								const bool is_selected = (printable_key_selected_idx == n);
+								if (ImGui::Selectable(printable_keys[n], is_selected)) {
+									printable_key_selected_idx = n;
+									printable_key_vk = printable_keys_vks[n];
+								}
+
+								// Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+								if (is_selected)
+									ImGui::SetItemDefaultFocus();
+							}
+							ImGui::EndCombo();
+						}
+						ImGui::PopItemWidth();
+						ImGui::EndTabItem();
+					}
 					ImGui::EndTabBar();
 				}
 
 				ImGui::End();
 			}
 		}
-
 
 		//ImGui::ShowDemoWindow();
 
@@ -490,16 +558,58 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 
 	/*
 	* If code is less than zero,
-	* the hook procedure must pass the message to the CallNextHookEx function without further processing
+	* the hook procedure must pas@s the message to the CallNextHookEx function without further processing
 	* and should return the value returned by CallNextHookEx.
 	*/
 	if (nCode >= 0) {
-		if (GetAsyncKeyState(0x32) & 0x8000 && GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+		//更新按键状态
+		if (wParam == WM_KEYDOWN) {
+			KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
+			if (p->vkCode == control_key_vk) {
+				control_key_state = 1;
+			} else if (p->vkCode == printable_key_vk) {
+				//只在control key按下的时候才去更新更新printable key
+				if (control_key_state == 1) {
+					printable_key_state = 1;
+				}
+			}
+		} else if(wParam == WM_KEYUP) {
+			KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
+			if (p->vkCode == control_key_vk) {
+				//control key抬起的时候printable key必须抬起
+				control_key_state = 0;
+				printable_key_state = 0;
+			} else if (p->vkCode == printable_key_vk) {
+				printable_key_state = 0;
+			}
+		} else if (wParam == WM_SYSKEYDOWN) {
+			//Alt + 某个键
+			KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
+			if (control_key_vk == VK_LMENU) {
+				if (p->vkCode == printable_key_vk) {
+					control_key_state = 1;
+					printable_key_state = 1;
+				}
+			}
+		} else if (wParam == WM_SYSKEYUP) {
+			//Alt + 某个键
+			KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
+			if (control_key_vk == VK_LMENU) {
+				if (p->vkCode == printable_key_vk) {
+					control_key_state = 0;
+					printable_key_state = 0;
+				}
+			}
+		}
+		//根据状态选择是否显示/隐藏
+		if (control_key_state && printable_key_state) {
 			if (hideFlag == SW_SHOW) {
 				hideFlag = SW_HIDE;
 			} else {
 				hideFlag = SW_SHOW;
 			}
+			//返回非0值让Windows停止把此消息传递到目标窗口
+			return 1;
 		}
 	}
 
