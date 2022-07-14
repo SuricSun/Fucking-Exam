@@ -196,9 +196,11 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	*/
 
 	// * 设置ImGui全局样式
-	ImGuiStyle style = ImGui::GetStyle();
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1);
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.14);
+	ImGuiStyle& ref_style = ImGui::GetStyle();
+	ref_style.FrameBorderSize = 1;
+	//下面两个rounding保持统一
+	ref_style.FrameRounding = 3.14;
+	ref_style.GrabRounding = 3.14;
 
 	// Main loop
 	bool shouldContinue = true;
@@ -244,64 +246,70 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 				if (ImGui::Button(U8("返回上一页"))) {
 					exam_file_selected = false;
 				}
+				ImGui::SameLine();
 				ImGui::TextColored(ImVec4(1, 0, 0, 1), U8("帧率 (%.3f FPS) / 帧时间 (%.3f ms)"), ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
 				ImGui::SliderInt(U8("窗口透明度"), &wnd_alpha, 32, 255);
 
 				ImGui::Spacing();
+				ImGui::Separator();
+				ImGui::Spacing();
 
 				//循环画
-
-				auto it = block_vec.begin();
-				ImGuiID id = 1; //id不能从0开始
-				ImGui::PushID(u8"Markdown内容");
-				while (it != block_vec.end()) {
-					Block& b = deref(it);
-					//渲染
-					if (b.blockType == Block::Part) {
-						//渲染背景
-						ImGui::GetWindowDrawList()->AddRectFilled(
-							ImVec2(b.x0, b.y0),
-							ImVec2(ImGui::GetWindowContentRegionMax().x, b.y1),
-							IM_COL32(255, 69, 0, 255),
-							ImGui::GetStyle().FrameRounding
-						);
-						//渲染标题
-						ImGui::TextWrapped((char*)b.blockName.c_str());
-						//获取标题包围盒
-						ImVec2 min = ImGui::GetItemRectMin();
-						ImVec2 max = ImGui::GetItemRectMax();
-						b.x0 = min.x;
-						b.y0 = min.y;
-						b.x1 = max.x;
-						b.y1 = max.y;
-						//渲染内容
-						if (b.content.length() > 0) {
-							ImGui::TextWrapped((char*)b.content.c_str());
+				//开启一个子窗口
+				if (ImGui::BeginChild(U8("MarkdownChildWindow"))) {
+					auto it = block_vec.begin();
+					ImGuiID id = 1; //id不能从0开始
+					ImGui::PushID(U8("Markdown内容"));
+					while (it != block_vec.end()) {
+						Block& b = deref(it);
+						//渲染
+						if (b.blockType == Block::Part) {
+							//渲染背景
+							ImGui::GetWindowDrawList()->AddRectFilled(
+								ImVec2(b.x0, b.y0),
+								ImVec2(ImGui::GetWindowContentRegionMax().x, b.y1),
+								IM_COL32(255, 69, 0, 255),
+								ImGui::GetStyle().FrameRounding
+							);
+							//渲染标题
+							ImGui::TextWrapped((char*)b.blockName.c_str());
+							//获取标题包围盒
+							ImVec2 min = ImGui::GetItemRectMin();
+							ImVec2 max = ImGui::GetItemRectMax();
+							b.x0 = min.x;
+							b.y0 = min.y;
+							b.x1 = max.x;
+							b.y1 = max.y;
+							//渲染内容
+							if (b.content.length() > 0) {
+								ImGui::TextWrapped((char*)b.content.c_str());
+							}
+						} else if (b.blockType == Block::Question) {
+							//渲染Bullet块
+							DummyRectWidget(id, ImVec2(b.x_len, b.y_len));
+							//如果被点击就把内容复制到剪切板
+							if (ImGui::IsItemClicked()) {
+								CopyToClipBoard((char*)b.content.c_str());
+							}
+							//同行
+							ImGui::SameLine();
+							//渲染标题
+							ImGui::TextWrapped((char*)b.blockName.c_str());
+							//获取标题高度
+							ImVec2 min = ImGui::GetItemRectMin();
+							ImVec2 max = ImGui::GetItemRectMax();
+							b.y_len = max.y - min.y;
+							//渲染内容
+							if (b.content.length() > 0) {
+								ImGui::TextWrapped((char*)b.content.c_str());
+							}
 						}
-					} else if (b.blockType == Block::Question) {
-						//渲染Bullet块
-						DummyRectWidget(id, ImVec2(b.x_len, b.y_len));
-						//如果被点击就把内容复制到剪切板
-						if (ImGui::IsItemClicked()) {
-							CopyToClipBoard((char*)b.content.c_str());
-						}
-						//同行
-						ImGui::SameLine();
-						//渲染标题
-						ImGui::TextWrapped((char*)b.blockName.c_str());
-						//获取标题高度
-						ImVec2 min = ImGui::GetItemRectMin();
-						ImVec2 max = ImGui::GetItemRectMax();
-						b.y_len = max.y - min.y;
-						//渲染内容
-						if (b.content.length() > 0) {
-							ImGui::TextWrapped((char*)b.content.c_str());
-						}
+						it++;
+						id++;
 					}
-					it++;
-					id++;
+					ImGui::PopID();
+					ImGui::EndChild();
 				}
-				ImGui::PopID();
 
 				//ImDrawList* p_dl = ImGui::GetWindowDrawList();
 				////p_dl->AddRectFilled(ImVec2(ImGui::GetCurrentWindow()->WindowPadding.x, min.y), ImVec2(20, max.y), IM_COL32(128, 128, 255, 255), 3.14);
@@ -684,9 +692,7 @@ void DummyRectWidget(ImGuiID id, ImVec2 in_size, bool is_filled, float thickness
 	g = color >> IM_COL32_G_SHIFT;
 	b = color >> IM_COL32_B_SHIFT;
 	a = color >> IM_COL32_A_SHIFT;
-	//获取rgb最大值
-	ImU32 maxx = max(r, g);
-	maxx = max(maxx, b);
+
 	//根据状态设置颜色
 	//IsItemActive优先级高
 	if (ImGui::IsItemActive()) {
