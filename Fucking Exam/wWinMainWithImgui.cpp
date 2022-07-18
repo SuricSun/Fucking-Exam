@@ -29,10 +29,10 @@ static char* textInputBuffer = new char[textInputBufferSize];
 static HGLOBAL clip_board_data_handle = NULL;
 
 // STATIC DATA
-static int control_key_vk = -1;
-static int printable_key_vk = -1;
-static int control_key_state = 0; //0 for key up 1 for key down
-static int printable_key_state = 0;
+static volatile int control_key_vk = -1;
+static volatile int printable_key_vk = -1;
+static volatile int control_key_state = 0; //0 for key up 1 for key down
+static volatile int printable_key_state = 0;
 
 // Forward declarations of helper functions
 bool CreateDeviceD3D(HWND hWnd);
@@ -77,7 +77,7 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	HWND hwnd = CreateWindowEx(
 		WS_EX_LAYERED,                              // Optional window styles.
 		CLASS_NAME,                     // Window class
-		L"Fucking Exam (Canary Version)",                // Window text
+		L"Fucking Exam (DirectX 11)",                // Window text
 		WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME,// Window style
 		// Size and position
 		32, 32, 512, 512,
@@ -289,7 +289,9 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 							DummyRectWidget(id, ImVec2(b.x_len, b.y_len));
 							//如果被点击就把内容复制到剪切板
 							if (ImGui::IsItemClicked()) {
-								CopyToClipBoard((char*)b.content.c_str());
+								if (b.content.size() > 0) {
+									CopyToClipBoard((char*)b.content.c_str());
+								}
 							}
 							//同行
 							ImGui::SameLine();
