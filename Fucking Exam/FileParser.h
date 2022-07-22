@@ -22,9 +22,8 @@ namespace FuckingExam {
 		u8string content;
 
 		//used by type Question
-		int x_len = 20, y_len = 0;
-		//used by type Part
-		int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		int question_x_len = 20, question_y_len = 0;
+		int part_x_len = 40, part_y_len = 0;
 	public:
 		Block();
 		Block(Type _blockType);
@@ -51,6 +50,13 @@ namespace FuckingExam {
 		/// 传入一个vector
 		/// </summary>
 		i32 parseFile(WCHAR* p_filePath, vector<Block>* p_inVec);
+		/// <summary>
+		/// 
+		/// </summary>
+		/// <param name="p_buffer">must not null</param>
+		/// <param name="bufferSize">must > 0</param>
+		/// <param name="p_inVec">must not null</param>
+		/// <returns></returns>
 		i32 parseFile(char* p_buffer, i32 bufferSize, vector<Block>* p_inVec);
 		~FileParser();
 	};

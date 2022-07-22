@@ -168,6 +168,12 @@
     <ClCompile Include="UTFStringAffair.cpp" />
     <ClCompile Include="wWinMainWithImgui.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\Resource\Icon\Aerith.ico" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -22,11 +22,14 @@ static ID3D11Device* g_pd3dDevice = NULL;
 static ID3D11DeviceContext* g_pd3dDeviceContext = NULL;
 static IDXGISwapChain* g_pSwapChain = NULL;
 static ID3D11RenderTargetView* g_mainRenderTargetView = NULL;
-static INT hideFlag = SW_SHOW;
+static INT hideFlag = SW_SHOWNA;
 static INT wnd_alpha = 255;
-static INT textInputBufferSize = 1 * 1024 * 1024;
-static char* textInputBuffer = new char[textInputBufferSize];
 static HGLOBAL clip_board_data_handle = NULL;
+static HMENU hTrayMenu = NULL;
+static NOTIFYICONDATA systrayData = {};
+static HICON Aerith = NULL;
+static HWND hWndMainWnd = NULL;
+static HWND hWndRootHidedWnd = NULL;
 
 // STATIC DATA
 static volatile int control_key_vk = -1;
@@ -42,6 +45,8 @@ void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam);
 void CopyToClipBoard(char* p_utf8_data);
+HWND CreateHidedWindow(HINSTANCE hInstance);
+boolean CreateSystemTrayAndMenu();
 
 /*
 * Wrapper functions of ImGui
@@ -52,13 +57,33 @@ void DummyRectWidget(ImGuiID id, ImVec2 in_size, bool is_filled = true, float th
 
 // MACROS
 #define U8(arg) (char*)u8 ## arg
-#define SayAndExit(arg) MessageBoxW(nullptr,arg,L"警告",MB_OK);return -1;
+#define SayAndExit(arg) MessageBoxW(nullptr,arg,L"ERROR",MB_OK);return -1;
 
 // Main code
 INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR lpCmdLine, _In_ INT nCmdShow) {
 
-	// Init Global Vars
-	ZeroMemory(textInputBuffer, textInputBufferSize);
+
+	// * MAKE SURE SINGLETON
+	HANDLE mutex = CreateMutexW(NULL, TRUE, L"1444_Fucking_Exam_Singleton_Mutex");
+	if (mutex != NULL) {
+		HRESULT hr = GetLastError();
+		if (hr == ERROR_ALREADY_EXISTS) {
+			SayAndExit(L"已经启动了Fucking Exam");
+		}
+	} else {
+		SayAndExit(L"无法创建单例互斥量");
+	}
+
+	// * Init Global Vars
+
+	// * create root_window which is hided
+	HWND root_window = CreateHidedWindow(hInstance);
+
+	if (root_window == NULL) {
+		SayAndExit(L"无法创建顶级隐藏窗口");
+	}
+
+	hWndRootHidedWnd = root_window;
 
 	// Create application window
 	//ImGui_ImplWin32_EnableDpiAwareness();
@@ -70,50 +95,65 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	wc.lpfnWndProc = WndProc;
 	wc.hInstance = hInstance;
 	wc.lpszClassName = CLASS_NAME;
+	Aerith = LoadIcon(hInstance, L"$Aerith");
+	if (Aerith == NULL) {
+		SayAndExit(L"无法加载Aerith图标");
+	}
+	wc.hIcon = Aerith;
 
 	RegisterClass(&wc);
 
+	int screenX = GetSystemMetrics(SM_CXSCREEN);
+	int screenY = GetSystemMetrics(SM_CYSCREEN);
+
 	// Create the window.
 	HWND hwnd = CreateWindowEx(
-		WS_EX_LAYERED,                              // Optional window styles.
-		CLASS_NAME,                     // Window class
-		L"Fucking Exam (DirectX 11)",                // Window text
-		WS_OVERLAPPED | WS_SYSMENU | WS_THICKFRAME,// Window style
-		// Size and position
-		32, 32, 512, 512,
-		NULL,       // Parent window    
-		NULL,       // Menu
-		hInstance,  // Instance handle
-		NULL        // Additional application data
+		WS_EX_LAYERED,										// Optional window styles.
+		CLASS_NAME,											// Window class
+		L"Fucking Exam (DirectX 11)",						// Window text
+		(WS_OVERLAPPEDWINDOW) & (~(WS_MINIMIZEBOX)),        // Window style
+		screenX / 4, screenY / 4, screenX / 2, screenY / 2, // Size and position
+		root_window,										// Parent window    
+		NULL,												// Menu
+		hInstance,											// Instance handle
+		NULL												// Additional application data
 	);
 
 	if (hwnd == NULL) {
-		SayAndExit(L"Err CreateWindowEx mainWnd");
+		SayAndExit(L"无法创建窗口");
 	}
 
+	hWndMainWnd = hwnd;
+
+	BringWindowToTop(hwnd);
+
 	if (SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE) == false) {
-		SayAndExit(L"Err SetWindowPos");
+		SayAndExit(L"无法置顶窗口");
 	}
 
 	if (SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_ALPHA) == false) {
-		SayAndExit(L"Err SetLayeredWindowAttributes");
+		SayAndExit(L"无法设置窗口透明属性");
 	}
 
 	if (SetWindowsHookExW(WH_KEYBOARD_LL, KeyBoardHook, NULL, NULL) == NULL) {
-		SayAndExit(L"Err SetWindowsHookExW");
+		SayAndExit(L"无法设置全局键盘钩子");
 	}
 
+	// * 初始化系统托盘和菜单
+	if (CreateSystemTrayAndMenu() == false) {
+		SayAndExit(L"无法创建托盘图标");
+	}
 	// * 初始化ImGui
 
 	// Initialize Direct3D
 	if (!CreateDeviceD3D(hwnd)) {
 		CleanupDeviceD3D();
 		::UnregisterClass(wc.lpszClassName, wc.hInstance);
-		SayAndExit(L"Err CreateDeviceD3D");
+		SayAndExit(L"无法初始化DirectX 11");
 	}
-
+	 
 	// Show the window
-	::ShowWindow(hwnd, SW_SHOWDEFAULT);
+	::ShowWindow(hwnd, SW_SHOWNORMAL);
 	::UpdateWindow(hwnd);
 
 	// Setup Dear ImGui context
@@ -155,15 +195,21 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 
 	boolean exam_file_selected = false;
 
-	int file_copy_str_length = 1024 * 1024;
-	char* p_file_copy_str = new char[file_copy_str_length];
-	ZeroMemory(p_file_copy_str, file_copy_str_length);
+	int text_copy_buffer_length = 1024 * 1024;
+	char* p_text_copy_buffer = new char[text_copy_buffer_length];
+	ZeroMemory(p_text_copy_buffer, text_copy_buffer_length);
+	CopyMemory(
+		p_text_copy_buffer,
+		u8"@选择题\n#题目一\nA B C D\n@简答题\n#题目一\n答案:\n(点击蓝色按钮复制答案到剪切板)\n1.aaa\n2.bbb\n",
+		sizeof(u8"@选择题\n#题目一\nA B C D\n@简答题\n#题目一\n答案:\n(点击蓝色按钮复制答案到剪切板)\n1.aaa\n2.bbb\n")
+	);
+
 
 	u8string file_parse_err_str;
 
-	int file_path_length = 1024;
-	char* p_file_path = new char[file_path_length];
-	ZeroMemory(p_file_path, file_path_length);
+	int file_path_buffer_length = 1024;
+	char* p_file_path_buffer = new char[file_path_buffer_length];
+	ZeroMemory(p_file_path_buffer, file_path_buffer_length);
 
 	vector<Block> block_vec;
 
@@ -204,24 +250,27 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 
 	// Main loop
 	bool shouldContinue = true;
-	while (shouldContinue) {
+	while (true) {
 		// Poll and handle messages (inputs, window resize, etc.)
 		// See the WndProc() function below for our to dispatch events to the Win32 backend.
 		MSG msg;
 		while (::PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				shouldContinue = false;
+				break;
+			}
 			::TranslateMessage(&msg);
 			::DispatchMessage(&msg);
-			if (msg.message == WM_QUIT)
-				shouldContinue = false;
 		}
-		if (shouldContinue == false)
+		if (shouldContinue == false) {
 			break;
+		}
 
 		if (SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE) == false) {
-			SayAndExit(L"Err SetWindowPos");
+			SayAndExit(L"无法置顶窗口");
 		}
 		if (SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), wnd_alpha, LWA_ALPHA) == false) {
-			SayAndExit(L"Err SetLayeredWindowAttributes");
+			SayAndExit(L"无法设置窗口透明属性");
 		}
 		ShowWindow(hwnd, hideFlag);
 
@@ -248,8 +297,11 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 				}
 				ImGui::SameLine();
 				ImGui::TextColored(ImVec4(1, 0, 0, 1), U8("帧率 (%.3f FPS) / 帧时间 (%.3f ms)"), ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
-				ImGui::SliderInt(U8("窗口透明度"), &wnd_alpha, 32, 255);
-
+				ImGui::SetNextItemWidth(-1);
+				ImGui::SliderInt(U8("##窗口透明度"), &wnd_alpha, 32, 255, U8("窗口透明度: %d"), ImGuiSliderFlags_AlwaysClamp);
+				ImGui::TextColored(ImVec4(0.25, 0.25, 0.25, 1), U8("左ALT + 方向上下键以控制窗口透明度"));
+				ImGui::TextColored(ImVec4(0.25, 0.25, 0.25, 1), U8("要设置更低的透明度, 请到系统托盘图标右键菜单"));
+				
 				ImGui::Spacing();
 				ImGui::Separator();
 				ImGui::Spacing();
@@ -264,29 +316,38 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 						Block& b = deref(it);
 						//渲染
 						if (b.blockType == Block::Part) {
-							//渲染背景
-							ImGui::GetWindowDrawList()->AddRectFilled(
-								ImVec2(b.x0, b.y0),
-								ImVec2(ImGui::GetWindowContentRegionMax().x, b.y1),
-								IM_COL32(255, 69, 0, 255),
-								ImGui::GetStyle().FrameRounding
+							//渲染Bullet块
+							DummyRectWidget(
+								id, 
+								ImVec2(b.part_x_len, b.part_y_len),
+								true,
+								1, 
+								IM_COL32(255, 69, 0, 255)
 							);
+							//同行
+							ImGui::SameLine();
 							//渲染标题
 							ImGui::TextWrapped((char*)b.blockName.c_str());
+							
 							//获取标题包围盒
+							//ImVec2 min = ImGui::GetItemRectMin();
+							//ImVec2 max = ImGui::GetItemRectMax();
+							//b.x0 = min.x;
+							//b.y0 = min.y;
+							//b.x1 = max.x;
+							//b.y1 = max.y;
+							
+							//获取标题高度
 							ImVec2 min = ImGui::GetItemRectMin();
 							ImVec2 max = ImGui::GetItemRectMax();
-							b.x0 = min.x;
-							b.y0 = min.y;
-							b.x1 = max.x;
-							b.y1 = max.y;
+							b.part_y_len = max.y - min.y;
 							//渲染内容
 							if (b.content.length() > 0) {
 								ImGui::TextWrapped((char*)b.content.c_str());
 							}
 						} else if (b.blockType == Block::Question) {
 							//渲染Bullet块
-							DummyRectWidget(id, ImVec2(b.x_len, b.y_len));
+							DummyRectWidget(id, ImVec2(b.question_x_len, b.question_y_len));
 							//如果被点击就把内容复制到剪切板
 							if (ImGui::IsItemClicked()) {
 								if (b.content.size() > 0) {
@@ -300,7 +361,7 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 							//获取标题高度
 							ImVec2 min = ImGui::GetItemRectMin();
 							ImVec2 max = ImGui::GetItemRectMax();
-							b.y_len = max.y - min.y;
+							b.question_y_len = max.y - min.y;
 							//渲染内容
 							if (b.content.length() > 0) {
 								ImGui::TextWrapped((char*)b.content.c_str());
@@ -340,21 +401,21 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 				ImGui::SetNextWindowSize(ImVec2(win32_wnd_rect.right, win32_wnd_rect.bottom));
 
 				// Create a window called "Hello, world!" and append into it.
-				ImGui::Begin(U8("##FileSelectWnd"), nullptr,
+				ImGui::Begin(U8("##ConfigWnd"), nullptr,
 							 ImGuiWindowFlags_NoMove |
 							 ImGuiWindowFlags_NoResize |
 							 ImGuiWindowFlags_NoTitleBar);
 
-				if (ImGui::BeginTabBar("SelectTabBar")) {
+				if (ImGui::BeginTabBar("##SelectTabBar")) {
 					if (ImGui::BeginTabItem(U8("直接复制文本"))) {
 						ImGui::Text(U8("复制文本到下方文本框"));
 						ImGui::SameLine();
 						if (ImGui::Button(U8("解析"))) {
 							//检查字符串长度是否合格
-							i32 bufferSize = Util::UTFStringAffair::UTF8StrLen((char8_t*)p_file_copy_str, 0);
+							i32 bufferSize = Util::UTFStringAffair::UTF8StrLen((char8_t*)p_text_copy_buffer, 0);
 							//开始解析
 							FileParser fp = FileParser();
-							if (fp.parseFile(p_file_copy_str, bufferSize, &block_vec) < 0) {
+							if (fp.parseFile(p_text_copy_buffer, bufferSize, &block_vec) < 0) {
 								file_parse_err_str = fp.errInfo;
 								ImGui::OpenPopup(U8("错误"));
 								ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -375,18 +436,18 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 							ImGui::EndPopup();
 						}
 						// *  文本复制框
-						ImGui::InputTextMultiline(U8("##"), p_file_copy_str, file_copy_str_length, ImVec2(-1, -1));
+						ImGui::InputTextMultiline(U8("##TextCopy"), p_text_copy_buffer, text_copy_buffer_length, ImVec2(-1, -1));
 						ImGui::EndTabItem();
 					}
 					if (ImGui::BeginTabItem(U8("从文件中打开"))) {
 						ImGui::Text(U8("请输入文本路径"));
 						// *  文件选择界面
-						ImGui::InputTextEx(U8("##"), U8("输入文本路径"), p_file_path, file_path_length, ImVec2(-1, 0), 0);
+						ImGui::InputTextEx(U8("##"), U8("输入文本路径"), p_file_path_buffer, file_path_buffer_length, ImVec2(-1, 0), 0);
 						if (ImGui::Button(U8("打开"))) {
 							//尝试解析文本，如果失败就报错(modal)
 
 							//先转换编码
-							u8string from = u8string((char8_t*)p_file_path);
+							u8string from = u8string((char8_t*)p_file_path_buffer);
 							u16string to = u16string();
 							Util::UTFStringAffair::UTF8To16(from, to);
 
@@ -481,12 +542,18 @@ INT WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	::DestroyWindow(hwnd);
 	::UnregisterClass(wc.lpszClassName, wc.hInstance);
 
+	Shell_NotifyIcon(NIM_DELETE, &systrayData);
+
+	// * CLOSE SINGLETON HANDLE
+	CloseHandle(mutex);
+
 	return 0;
 }
 
 // Helper functions
 
 bool CreateDeviceD3D(HWND hWnd) {
+
 	// Setup swap chain
 	DXGI_SWAP_CHAIN_DESC sd;
 	ZeroMemory(&sd, sizeof(sd));
@@ -516,6 +583,7 @@ bool CreateDeviceD3D(HWND hWnd) {
 }
 
 void CleanupDeviceD3D() {
+
 	CleanupRenderTarget();
 	if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = NULL; }
 	if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = NULL; }
@@ -523,6 +591,7 @@ void CleanupDeviceD3D() {
 }
 
 void CreateRenderTarget() {
+
 	ID3D11Texture2D* pBackBuffer;
 	g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
 	g_pd3dDevice->CreateRenderTargetView(pBackBuffer, NULL, &g_mainRenderTargetView);
@@ -530,6 +599,7 @@ void CreateRenderTarget() {
 }
 
 void CleanupRenderTarget() {
+
 	if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = NULL; }
 }
 
@@ -542,6 +612,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
 // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+
 	if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
 		return true;
 
@@ -560,7 +631,42 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_DESTROY:
 		::PostQuitMessage(0);
 		return 0;
+	case WM_USER:
+		if (lParam == WM_RBUTTONUP) {
+			SetForegroundWindow(hWndMainWnd);
+			POINT pt;
+			GetCursorPos(&pt);
+			TrackPopupMenuEx(
+				hTrayMenu,
+				TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_NOANIMATION | TPM_LEFTBUTTON,
+				pt.x,
+				pt.y,
+				hWndMainWnd,
+				nullptr
+			);
+		} else if (lParam == WM_LBUTTONUP) {
+			//hide flag必须设置，以让消息循环里面的ShowWindow使用
+			hideFlag = SW_SHOWNA;
+			ShowWindow(hWndMainWnd, hideFlag);
+		}
+	case WM_COMMAND:
+		if (wParam == 0) {
+			DestroyWindow(hWndMainWnd);
+		} else if (wParam == 1) {
+			MessageBox(hWndMainWnd, L"By 一位不愿意透露姓名的网友", L"关于", MB_OK | MB_TOPMOST);
+		} else if (wParam == 32) {
+			wnd_alpha = 8;
+		} else if (wParam == 33) {
+			wnd_alpha = 16;
+		} else if (wParam == 34) {
+			wnd_alpha = 32;
+		} else if (wParam == 35) {
+			wnd_alpha = 64;
+		} else if (wParam == 36) {
+			wnd_alpha = 128;
+		}
 	}
+	//DefWindowProc respond to WM_CLOSE automatically, so we only need to handle WM_DESTROY and in message loop we detect WM_QUIT
 	return ::DefWindowProc(hWnd, msg, wParam, lParam);
 }
 
@@ -601,6 +707,17 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 					printable_key_state = 1;
 				}
 			}
+			if (p->vkCode == VK_UP) {
+				wnd_alpha+=2;
+				if (wnd_alpha > 255) {
+					wnd_alpha = 255;
+				}
+			} else if (p->vkCode == VK_DOWN) {
+				wnd_alpha-=2;
+				if (wnd_alpha < 32) {
+					wnd_alpha = 32;
+				}
+			}
 		} else if (wParam == WM_SYSKEYUP) {
 			//Alt + 某个键
 			KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
@@ -613,10 +730,10 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 		}
 		//根据状态选择是否显示/隐藏
 		if (control_key_state && printable_key_state) {
-			if (hideFlag == SW_SHOW) {
+			if (hideFlag == SW_SHOWNA) {
 				hideFlag = SW_HIDE;
 			} else {
-				hideFlag = SW_SHOW;
+				hideFlag = SW_SHOWNA;
 			}
 			//返回非0值让Windows停止把此消息传递到目标窗口
 			return 1;
@@ -718,4 +835,73 @@ void DummyRectWidget(ImGuiID id, ImVec2 in_size, bool is_filled, float thickness
 	} else {
 		ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), color, rounding, 0, thickness);
 	}
+}
+
+HWND CreateHidedWindow(HINSTANCE hInstance) {
+
+	const WCHAR* p = L"root_window";
+
+	WNDCLASS wc = { };
+
+	wc.lpfnWndProc = DefWindowProc;
+	wc.hInstance = hInstance;
+	wc.lpszClassName = p;
+
+	RegisterClass(&wc);
+
+	// Create the window.
+	HWND hwnd = CreateWindowEx(
+		0,                              // Optional window styles.
+		p,                     // Window class
+		p,                // Window text
+		WS_OVERLAPPED,// Window style
+		// Size and position
+		0, 0, 1, 1,
+		NULL,       // Parent window    
+		NULL,       // Menu
+		hInstance,  // Instance handle
+		NULL        // Additional application data
+	);
+
+	if (hwnd == NULL) {
+		return NULL;
+	} else {
+		ShowWindow(hwnd, SW_HIDE);
+		return hwnd;
+	}
+}
+
+boolean CreateSystemTrayAndMenu() {
+	
+	hTrayMenu = CreatePopupMenu();
+	if (hTrayMenu == NULL) {
+		return false;
+	
+	}
+	AppendMenuW(hTrayMenu, MF_STRING, 32, L"透明度设为8");
+	AppendMenuW(hTrayMenu, MF_STRING, 33, L"透明度设为16");
+	AppendMenuW(hTrayMenu, MF_STRING, 34, L"透明度设为32");
+	AppendMenuW(hTrayMenu, MF_STRING, 35, L"透明度设为64");
+	AppendMenuW(hTrayMenu, MF_STRING, 36, L"透明度设为128");
+	AppendMenuW(hTrayMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenuW(hTrayMenu, MF_STRING, 0, L"退出");
+	AppendMenuW(hTrayMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenuW(hTrayMenu, MF_STRING, 1, L"关于");
+
+	// * 创建托盘
+	ZeroMemory(&systrayData, sizeof(systrayData));
+	systrayData.cbSize = sizeof(systrayData);
+	systrayData.hWnd = hWndMainWnd;
+	systrayData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // TIP是hover提示 MESSAGE是点击托盘图标会发送消息到消息队列
+	systrayData.hIcon = Aerith;
+	systrayData.uID = (UINT)hWndMainWnd;
+	systrayData.uCallbackMessage = UINT(WM_USER);
+	systrayData.uVersion = NOTIFYICON_VERSION;
+	CopyMemory(systrayData.szTip, L"Fucking Exam\n正在运行", sizeof(L"Fucking Exam\n正在运行"));
+
+	if (Shell_NotifyIcon(NIM_ADD, &systrayData) == false) {
+		return false;
+	}
+
+	return true;
 }

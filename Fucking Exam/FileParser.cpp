@@ -45,12 +45,6 @@ i32 FuckingExam::FileParser::parseFile(char* p_buffer, i32 bufferSize, vector<Bl
 	i32 markPos = 0;
 	Block tmpBlock;
 
-	//buffer太小
-	if (bufferSize < 1) {
-		this->errInfo = u8"文本为空!";
-		return -1;
-	}
-
 	//初始化状态
 	if (p_buffer[curPos] == '@') {
 		state0 = State::TypePart;
@@ -122,6 +116,11 @@ i32 FuckingExam::FileParser::parseFile(char* p_buffer, i32 bufferSize, vector<Bl
 			}
 		} else if (state1 == State::PostBlock) {
 			//ez
+			//剪切板复制上来的数据末尾总是有换行符，且会被读取到string
+			if (tmpBlock.blockType == Block::Type::Part) {
+				tmpBlock.blockName.append(1, '\n');
+				tmpBlock.blockName.insert(tmpBlock.blockName.begin(), '\n');
+			}
 			state0 = State::DetectType;
 			p_inVec->emplace_back(tmpBlock);
 			//初始化新的block
@@ -147,6 +146,10 @@ i32 FuckingExam::FileParser::parseFile(WCHAR* p_filePath, vector<Block>* p_inVec
 		return -1;
 	}
 	i64 fileSize = li.QuadPart;
+	if (fileSize < 1) {
+		this->errInfo = u8"文本为空!";
+		return -1;
+	}
 	//read to buffer
 	char* p_buffer = new char[fileSize];
 	i64 bytesRead = 0;
