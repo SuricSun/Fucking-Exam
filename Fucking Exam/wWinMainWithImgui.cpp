@@ -653,7 +653,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		if (wParam == 0) {
 			DestroyWindow(hWndMainWnd);
 		} else if (wParam == 1) {
-			MessageBox(hWndMainWnd, L"By 一位不愿意透露姓名的网友", L"关于", MB_OK | MB_TOPMOST);
+			MessageBox(hWndMainWnd, L"来自一位不愿意透露姓名的网友", L"关于", MB_OK | MB_TOPMOST);
 		} else if (wParam == 32) {
 			wnd_alpha = 8;
 		} else if (wParam == 33) {
@@ -677,6 +677,7 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 	* the hook procedure must pas@s the message to the CallNextHookEx function without further processing
 	* and should return the value returned by CallNextHookEx.
 	*/
+	bool key_msg_intercepted = false;
 	if (nCode >= 0) {
 		//更新按键状态
 		if (wParam == WM_KEYDOWN) {
@@ -687,6 +688,7 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 				//只在control key按下的时候才去更新更新printable key
 				if (control_key_state == 1) {
 					printable_key_state = 1;
+					key_msg_intercepted = true;
 				}
 			}
 		} else if(wParam == WM_KEYUP) {
@@ -697,6 +699,7 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 				printable_key_state = 0;
 			} else if (p->vkCode == printable_key_vk) {
 				printable_key_state = 0;
+				key_msg_intercepted = true;
 			}
 		} else if (wParam == WM_SYSKEYDOWN) {
 			//Alt + 某个键
@@ -705,6 +708,7 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 				if (p->vkCode == printable_key_vk) {
 					control_key_state = 1;
 					printable_key_state = 1;
+					key_msg_intercepted = true;
 				}
 			}
 			if (p->vkCode == VK_UP) {
@@ -712,11 +716,13 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 				if (wnd_alpha > 255) {
 					wnd_alpha = 255;
 				}
+				key_msg_intercepted = true;
 			} else if (p->vkCode == VK_DOWN) {
 				wnd_alpha-=2;
 				if (wnd_alpha < 32) {
 					wnd_alpha = 32;
 				}
+				key_msg_intercepted = true;
 			}
 		} else if (wParam == WM_SYSKEYUP) {
 			//Alt + 某个键
@@ -725,6 +731,7 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 				if (p->vkCode == printable_key_vk) {
 					control_key_state = 0;
 					printable_key_state = 0;
+					key_msg_intercepted = true;
 				}
 			}
 		}
@@ -735,6 +742,9 @@ LRESULT CALLBACK KeyBoardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 			} else {
 				hideFlag = SW_SHOWNA;
 			}
+		}
+
+		if (key_msg_intercepted) {
 			//返回非0值让Windows停止把此消息传递到目标窗口
 			return 1;
 		}
@@ -876,13 +886,13 @@ boolean CreateSystemTrayAndMenu() {
 	hTrayMenu = CreatePopupMenu();
 	if (hTrayMenu == NULL) {
 		return false;
-	
 	}
-	AppendMenuW(hTrayMenu, MF_STRING, 32, L"透明度设为8");
-	AppendMenuW(hTrayMenu, MF_STRING, 33, L"透明度设为16");
-	AppendMenuW(hTrayMenu, MF_STRING, 34, L"透明度设为32");
-	AppendMenuW(hTrayMenu, MF_STRING, 35, L"透明度设为64");
 	AppendMenuW(hTrayMenu, MF_STRING, 36, L"透明度设为128");
+	AppendMenuW(hTrayMenu, MF_STRING, 35, L"透明度设为64");
+	AppendMenuW(hTrayMenu, MF_STRING, 34, L"透明度设为32");
+	AppendMenuW(hTrayMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenuW(hTrayMenu, MF_STRING, 33, L"透明度设为16");
+	AppendMenuW(hTrayMenu, MF_STRING, 32, L"透明度设为8");
 	AppendMenuW(hTrayMenu, MF_SEPARATOR, 0, NULL);
 	AppendMenuW(hTrayMenu, MF_STRING, 0, L"退出");
 	AppendMenuW(hTrayMenu, MF_SEPARATOR, 0, NULL);
